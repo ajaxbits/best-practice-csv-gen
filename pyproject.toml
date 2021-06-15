@@ -1,0 +1,20 @@
+[tool.poetry]
+name = "best-practice-csv-gen"
+version = "0.1.0"
+description = "\"Generates best practice report from a DS configuration, and generates a CSV\""
+authors = ["Alex Jackson <alex_jackson@trendmicro.com>"]
+license = "BSD"
+
+[tool.poetry.dependencies]
+python = "^3.8"
+pandas = "^1.2.4"
+requests = "urllib3"
+urllib3 = "^1.26.5"
+
+[tool.poetry.dev-dependencies]
+nose2 = "^0.10.0"
+black = "^21.6b0"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
