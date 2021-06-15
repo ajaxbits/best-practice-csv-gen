@@ -4,18 +4,11 @@ import sys
 from typing import List
 
 import pandas as pd
-from pandas.core import base
 import requests
 
 cert = False
 
-
 def sanitize_sort_policy(json: dict) -> dict:
-    # no_fly_keys = ["name", "ID", "parentID", "activityMonitoring"]
-    # clean_json = {}
-    # for key in no_fly_keys:
-    #     if json.get(key) is not None:
-    #         del json[key]
     clean_json = json
     sorted_keys = sorted(json.keys())
     for key in sorted_keys:
@@ -71,105 +64,19 @@ def gather_all_policy_json(url_link_final: str, tenant1key: str) -> List[dict]:
     return allofpolicy
 
 
-def substring_row_eliminator(
-    column, no_fly_list: list, data_frame: pd.DataFrame
-) -> pd.DataFrame:
-    for string in no_fly_list:
-        data_frame = data_frame[~data_frame[column].str.contains(string)]
-    return data_frame
-
-
-def extrapolate_column(data_frame: pd.DataFrame, column: str):
-    return data_frame[column].str[12:24]
-
-
-def accounts_extrapolated(data_frame):
-    mask = data_frame["Computer Group"].str.len() > 30
-    data_frame.loc[mask, "Cloud Account Extrapolated"] = extrapolate_column(
-        data_frame, "Computer Group"
-    )
-    return data_frame
-
-
-def accounts_extrapolated_use_this_one(data_frame):
-    data_frame["Cloud Account Extrapolated (Use This Column)"] = data_frame[
-        "Cloud Account Extrapolated"
-    ].fillna(method="ffill")
-    return data_frame
-
-
-def order_data_frame(data_frame):
-    cols = [
-        "Id",
-        "Hostname",
-        "Display Name",
-        "Computer Group",
-        "Instance Type",
-        "Start Date",
-        "Start Time",
-        "Stop Date",
-        "Stop Time",
-        "Duration (Seconds)",
-        "Cloud Account Extrapolated (Use This Column)",
-        "Cloud Account Extrapolated",
-        "Cloud Account",
-        "AM",
-        "WRS",
-        "AC",
-        "IM",
-        "LI",
-        "FW",
-        "DPI",
-    ]
-    return data_frame[cols]
-
-
-# INFILE = sys.argv[1]
-# OUTFILE = sys.argv[2]
-
-# df = pd.read_csv(INFILE)
-
-# no_fly_list = [
-#     "Computers > Linux \(group 2\) > DPC",
-#     "Computers > Windows \(group 1\) > DPC",
-#     "Computers > Windows \(group 1\) > CC",
-#     "Computers > Linux \(group 2\) > CC",
-# ]
-
-# print("deleting CC and DPC rows...")
-# df = substring_row_eliminator("Computer Group", no_fly_list, df)
-
-# print("Extrapolating Cloud accounts...")
-# df = accounts_extrapolated(df)
-
-# print("Further Extrapolation and copying...")
-# df = accounts_extrapolated_use_this_one(df)
-
-# print("Sorting rows and columns...")
-# df = order_data_frame(df)
-# df = df.sort_values(["Computer Group", "Id"])
-
-# print("Creating CSV...")
-# df.to_csv(OUTFILE, index=False)
-def exclude_keys(set: list):
-    no_fly_keys = ["name", "ID", "parentID", "activityMonitoring", "rule_IDs"]
-    for item in set:
-        if item in no_fly_keys:
-            set.remove(item)
-    return set
-
-
-def recursive_compare(json_a, json_b, policy_id, policy_name, df_dict, level="root"):
+def recursive_df_dict_generate(
+    json_a, json_b, policy_id, policy_name, df_dict, level="root"
+):
     if isinstance(json_a, dict) and isinstance(json_b, dict):
         if json_a.keys() != json_b.keys():
             s1 = set(json_a.keys())
             s2 = set(json_b.keys())
             common_keys = s1 & s2
         else:
-            common_keys = exclude_keys(set(json_a.keys()))
+            common_keys = set(json_a.keys())
 
         for common_key in common_keys:
-            recursive_compare(
+            recursive_df_dict_generate(
                 json_a[common_key],
                 json_b[common_key],
                 policy_id,
@@ -185,6 +92,20 @@ def recursive_compare(json_a, json_b, policy_id, policy_name, df_dict, level="ro
             df_dict["currentConfiguration"].append(json_a)
             df_dict["trendRecommendedConfiguration"].append(json_b)
     return df_dict
+
+
+def sanitize_dataframe(dataframe, column):
+    no_fly_keys = [
+        "ruleID",
+        "root > name",
+        "root > ID",
+        "root > parentID",
+        "statusMessage",
+        "root > description",
+    ]
+    for key in no_fly_keys:
+        dataframe = dataframe[~dataframe[column].str.contains(key)]
+    return dataframe
 
 
 if __name__ == "__main__":
@@ -204,10 +125,11 @@ if __name__ == "__main__":
     for policy in allofpolicy:
         policy_id = policy.get("ID")
         policy_name = policy.get("name")
-        df_dict = recursive_compare(
+        df_dict = recursive_df_dict_generate(
             policy, best_practices, policy_id, policy_name, df_dict
         )
 
     df = pd.DataFrame.from_dict(df_dict)
-    df.to_csv("report.csv")
-    print("hello")
+    df = sanitize_dataframe(df, "policySetting")
+    df = df.sort_values(by=["policyID", "policySetting"])
+    df.to_csv("report.csv", index=False)

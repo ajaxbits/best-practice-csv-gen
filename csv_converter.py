@@ -1,6 +1,7 @@
 import pandas as pd
 import sys
 
+
 def substring_row_eliminator(
     column, no_fly_list: list, data_frame: pd.DataFrame
 ) -> pd.DataFrame:
