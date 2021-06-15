@@ -1,5 +1,6 @@
+#!/usr/bin/env python3
+
 import json
-import os
 import sys
 from typing import List
 
@@ -7,6 +8,7 @@ import pandas as pd
 import requests
 
 cert = False
+
 
 def sanitize_sort_policy(json: dict) -> dict:
     clean_json = json
@@ -109,10 +111,13 @@ def sanitize_dataframe(dataframe, column):
 
 
 if __name__ == "__main__":
-    best_practices = load_best_practices("best-practice-policy.json")
-    allofpolicy = gather_all_policy_json(
-        "https://cloudone.trendmicro.com/", os.environ.get("DS_API_KEY")
-    )
+    REPORT_NAME = sys.argv[1]
+    BEST_PRACTICES = sys.argv[2]
+    URL = sys.argv[3]
+    API_KEY = sys.argv[4]
+
+    best_practices = load_best_practices(BEST_PRACTICES)
+    allofpolicy = gather_all_policy_json(URL, API_KEY)
 
     df_dict = {
         "policyID": [],
@@ -132,4 +137,4 @@ if __name__ == "__main__":
     df = pd.DataFrame.from_dict(df_dict)
     df = sanitize_dataframe(df, "policySetting")
     df = df.sort_values(by=["policyID", "policySetting"])
-    df.to_csv("report.csv", index=False)
+    df.to_csv(REPORT_NAME, index=False)
