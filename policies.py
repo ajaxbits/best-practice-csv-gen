@@ -1,22 +1,22 @@
 import json
 import os
 import sys
-import typing
-from types import SimpleNamespace
-from typing import List, Tuple, Union
+from typing import List
 
 import pandas as pd
+from pandas.core import base
 import requests
 
 cert = False
 
 
 def sanitize_sort_policy(json: dict) -> dict:
-    no_fly_keys = ["ID", "parentID", "activityMonitoring"]
-    clean_json = {}
-    for key in no_fly_keys:
-        if json.get(key) is not None:
-            del json[key]
+    # no_fly_keys = ["name", "ID", "parentID", "activityMonitoring"]
+    # clean_json = {}
+    # for key in no_fly_keys:
+    #     if json.get(key) is not None:
+    #         del json[key]
+    clean_json = json
     sorted_keys = sorted(json.keys())
     for key in sorted_keys:
         clean_json[key] = json[key]
@@ -151,11 +151,61 @@ def order_data_frame(data_frame):
 
 # print("Creating CSV...")
 # df.to_csv(OUTFILE, index=False)
+def exclude_keys(set: list):
+    no_fly_keys = ["name", "ID", "parentID", "activityMonitoring", "rule_IDs"]
+    for item in set:
+        if item in no_fly_keys:
+            set.remove(item)
+    return set
+
+
+def recursive_compare(json_a, json_b, policy_id, policy_name, df_dict, level="root"):
+    if isinstance(json_a, dict) and isinstance(json_b, dict):
+        if json_a.keys() != json_b.keys():
+            s1 = set(json_a.keys())
+            s2 = set(json_b.keys())
+            common_keys = s1 & s2
+        else:
+            common_keys = exclude_keys(set(json_a.keys()))
+
+        for common_key in common_keys:
+            recursive_compare(
+                json_a[common_key],
+                json_b[common_key],
+                policy_id,
+                policy_name,
+                df_dict,
+                level=f"{level} > {common_key}",
+            )
+    else:
+        if json_a != json_b:
+            df_dict["policyName"].append(policy_name)
+            df_dict["policyID"].append(policy_id)
+            df_dict["policySetting"].append(level)
+            df_dict["currentConfiguration"].append(json_a)
+            df_dict["trendRecommendedConfiguration"].append(json_b)
+    return df_dict
+
 
 if __name__ == "__main__":
     best_practices = load_best_practices("best-practice-policy.json")
     allofpolicy = gather_all_policy_json(
         "https://cloudone.trendmicro.com/", os.environ.get("DS_API_KEY")
     )
+
+    df_dict = {
+        "policyID": [],
+        "policyName": [],
+        "policySetting": [],
+        "trendRecommendedConfiguration": [],
+        "currentConfiguration": [],
+    }
+
+    for policy in allofpolicy:
+        policy_id = policy.get("ID")
+        policy_name = policy.get("Name")
+        df_dict = recursive_compare(
+            policy, best_practices, policy_id, policy_name, df_dict
+        )
 
     print("hello")
