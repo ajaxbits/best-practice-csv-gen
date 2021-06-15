@@ -1,5 +1,1 @@
-{
-  "python.pythonPath": "/nix/store/n5p06n19fvwqwg9s7yps9hj651sif11q-python3-3.8.9-env/bin/python",
-  "python.formatting.provider": "black",
-  "python.formatting.blackPath": "/nix/store/n5p06n19fvwqwg9s7yps9hj651sif11q-python3-3.8.9-env/bin/black"
-}
+{"python.pythonPath": "/nix/store/n5p06n19fvwqwg9s7yps9hj651sif11q-python3-3.8.9-env/bin/python", "python.formatting.provider": "black", "python.formatting.blackPath": "/nix/store/n5p06n19fvwqwg9s7yps9hj651sif11q-python3-3.8.9-env/bin/black", "coc.preferences.formatOnSaveFiletypes":["python"]}

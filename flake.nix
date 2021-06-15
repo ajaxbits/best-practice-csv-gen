@@ -1,5 +1,5 @@
 {
-  description = "my project description";
+  description = "Best Practices CSV Report Generator";
 
   inputs = {
     unstable.url = "github:NixOS/nixpkgs/nixos-unstable";

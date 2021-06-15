@@ -1,213 +1,161 @@
 import json
+import os
+import sys
 import typing
 from types import SimpleNamespace
+from typing import List, Tuple, Union
 
+import pandas as pd
 import requests
-from deepsecurity.rest import ApiException
-
-from dsmigrator.api_config import PolicyApiInstance
-from dsmigrator.logging import log
-from dsmigrator.migrator_utils import safe_request
 
 cert = False
 
 
-def delete_cloud_one_policies(CLOUD_ONE_API_KEY: str):
-    log.info("Deleting Policies from Cloud One...")
-
-    host = "https://cloudone.trendmicro.com/api/policies"
-    message = requests.get(
-        host,
-        verify=False,
-        headers={"api-secret-key": CLOUD_ONE_API_KEY, "api-version": "v1"},
-    )
-    parsed = message.text
-    x = json.loads(parsed, object_hook=lambda d: SimpleNamespace(**d))
-    policyNumbers = []
-    for key in x.policies:  # ERRORS here
-        policyNumbers.append(key.ID)
-    if policyNumbers:
-        for policyID in policyNumbers:
-            log.info(f"Deleting policy #{policyID}")
-            policyHost = f"https://cloudone.trendmicro.com/api/policies/{policyID}"
-            requests.delete(
-                policyHost,
-                verify=False,
-                headers={"api-secret-key": CLOUD_ONE_API_KEY, "api-version": "v1"},
-            )
-    else:
-        log.info("No policies detected in Cloud One. Skipping.")
+def sanitize_sort_policy(json: dict) -> dict:
+    no_fly_keys = ["ID", "parentID", "activityMonitoring"]
+    clean_json = {}
+    for key in no_fly_keys:
+        if json.get(key) is not None:
+            del json[key]
+    sorted_keys = sorted(json.keys())
+    for key in sorted_keys:
+        clean_json[key] = json[key]
+    return clean_json
 
 
-def ListAllPolicy(url_link_final, tenant1key):
-    payload = {}
-    url = url_link_final + "api/policies"
-    response = safe_request(tenant1key, "GET", url, payload=payload, cert=cert)
-    describe = str(response.text)
-    oldpolicynameid_dict = {}
-    oldpolicyid = []
-    namejson = json.loads(describe)
-    for policy in namejson["policies"]:
-        oldpolicynameid_dict[str(policy["name"])] = str(policy["ID"])
-        oldpolicyid.append(str(policy["ID"]))
-    return oldpolicyid, oldpolicynameid_dict
+def load_best_practices(file_path: str):
+    with open(file_path, "r") as best_practices_file:
+        best_practices = best_practices_file.read()
+        best_practices_json = json.loads(best_practices)
+        return sanitize_sort_policy(best_practices_json)
 
 
-def GetPolicy(policyIDs, url_link_final, tenant1key):
-    antimalwareconfig = []
-    allofpolicy = []
-    i = 0
-    log.info("Getting Policy from Deep Security")
-    for count, part in enumerate(policyIDs):
-        payload = {}
-        url = url_link_final + "api/policies/" + str(part)
-        response = safe_request(tenant1key, "GET", url, payload=payload, cert=cert)
-        policy_string = str(response.text)
-        i = i + 1
-        allofpolicy.append(policy_string)
-        log.info("#" + str(count) + " Policy ID: " + str(part))
-        rtscan = policy_string.find("realTimeScanConfigurationID")
-        if rtscan != -1:
-            rtpart = policy_string[rtscan + 28 :]
-            startIndex = rtpart.find(":")
-            if startIndex != -1:  # i.e. if the first quote was found
-                endIndex = rtpart.find(",", startIndex + 1)
-                if startIndex != -1 and endIndex != -1:  # i.e. both quotes were found
-                    rtid = rtpart[startIndex + 1 : endIndex]
-                    antimalwareconfig.append(str(rtid))
-
-        mscan = policy_string.find("manualScanConfigurationID")
-        if mscan != -1:
-            mpart = policy_string[mscan + 26 :]
-            startIndex = mpart.find(":")
-            if startIndex != -1:  # i.e. if the first quote was found
-                endIndex = mpart.find(",", startIndex + 1)
-                if startIndex != -1 and endIndex != -1:  # i.e. both quotes were found
-                    mid = mpart[startIndex + 1 : endIndex]
-                    antimalwareconfig.append(str(mid))
-
-        sscan = policy_string.find("scheduledScanConfigurationID")
-        if sscan != -1:
-            spart = policy_string[sscan + 29 :]
-            startIndex = spart.find(":")
-            if startIndex != -1:  # i.e. if the first quote was found
-                endIndex = spart.find("}", startIndex + 1)
-                if startIndex != -1 and endIndex != -1:  # i.e. both quotes were found
-                    ssid = spart[startIndex + 1 : endIndex]
-                    antimalwareconfig.append(str(ssid))
-    antimalwareconfig = list(dict.fromkeys(antimalwareconfig))
-    return antimalwareconfig, allofpolicy
-
-
-def policy_validate_create(
-    all_old: typing.List[str], api_instance: PolicyApiInstance, type: str
-) -> typing.Dict[int, int]:
+def gather_all_policy_json(url_link_final: str, tenant1key: str) -> List[dict]:
     """
-    Takes in a list of json strings that represent policies, sets some key
-    settings, assigns the proper parent ID to each, creates each policy,
-    renames if necessary, and outputs a dictionary of form
-    {oldid: newid, ...} for future use.
+    takes in DSM url and API key, transforms into a list of json policies
 
     Args:
-        all_old (typing.List[str]): A list containing strings of json data
-                                    representing policies
-        api_instance (PolicyApiInstance): From api_config, a wrapper SDK class
-        type (str): The type of output for printing purposes
+        url_link_final (str): full access DS api key
+        tenant1key (str): full access DS api key
 
     Returns:
-        typing.Dict[int, int]: dict of form {oldid:newid, ...}
+        List[dict]: a list of policy json objects
     """
-
-    def sort_policies(list_item: str) -> int:
-        """
-        Loads a list item from allofpolicy, finds the parentID if there is one,
-        and returns an integer that is used to sort allofpolicy sequentially by
-        parentID.
-
-        Args:
-            list_item (str): item from allofpolicy
-
-        Returns:
-            int: index number representing the parentID heirarchy of a
-                 particular policy
-        """
-        item = json.loads(list_item)
-        parent_ID = item.get("parentID")
-        if parent_ID is not None:
-            sorter = parent_ID
-        else:
-            sorter = 0
-        return sorter
-
-    all_new = []
-    id_dict = {}
-    all_old.sort(key=sort_policies)
-
-    for count, dirlist in enumerate(all_old):
-        namecheck = 1
-        rename = 1
-        oldjson = json.loads(dirlist)
-        oldname = oldjson["name"]
-        oldid = oldjson["ID"]
-        # cleanup input
-        if "policySettings" in oldjson.keys():
-            oldjson["policySettings"]["platformSettingAgentCommunicationsDirection"] = {
-                "value": "Agent/Appliance Initiated"
-            }
-        # Modify parent ID. If errors, to prevent wasted time, create policy at base level.
-        try:
-            if "parentID" in oldjson.keys():
-                oldjson["parentID"] = id_dict[oldjson["parentID"]]
-        except Exception as e:
-            log.exception(e)
-            log.warning(
-                "ParentID error. Creating policy at base level, please set inheritance manually."
-            )
-            del oldjson["parentID"]
-            pass
-        # Mutate policy name to create proper inheritance
-        oldjson["name"] = f"{oldname} - Migrated"
-        while namecheck != -1:
-            try:
-                newname = api_instance.create(oldjson)
-                newid = api_instance.search(newname).id
-                id_dict[oldid] = newid
-                log.info(
-                    "#"
-                    + str(count)
-                    + " "
-                    + type.capitalize()
-                    + " List ID: "
-                    + str(newid)
-                    + ", Name: "
-                    + newname,
-                )
-                all_new.append(str(newid))
-                namecheck = -1
-            except ApiException as e:
-                error_json = json.loads(e.body)
-                if "name already exists" in error_json["message"]:
-                    log.info(
-                        f"{oldjson['name']} already exists in new tenant, renaming..."
-                    )
-                    oldjson["name"] = oldname + " {" + str(rename) + "}"
-                    rename = rename + 1
-                else:
-                    log.exception(e)
-                    log.error(
-                        f"{oldname} could not be transferred. Please transfer manually."
-                    )
-                    namecheck = -1
-    id_dict[0] = 0
-    return id_dict
-
-
-cert = False
-
-
-def AddPolicy(allofpolicy: typing.List[str], NEW_API_KEY: str) -> typing.Dict[int, int]:
-    log.info("Creating Policy to Tenant 2 with new ID")
-    if allofpolicy:
-        return policy_validate_create(
-            allofpolicy, PolicyApiInstance(NEW_API_KEY), "policy"
+    allofpolicy = []
+    url = url_link_final + "api/policies"
+    headers = {
+        "api-secret-key": tenant1key,
+        "api-version": "v1",
+        "Content-Type": "application/json",
+    }
+    try:
+        response = requests.request(
+            "GET",
+            url,
+            headers=headers,
+            data={},
+            verify=cert,
         )
+    except Exception as e:
+        print(e)
+        print(
+            "Having trouble connecting to the old DSM. Please ensure the url and routes are correct."
+        )
+        print("Aborting...")
+        sys.exit(0)
+    response_str = str(response.text)
+    all_policies_json = json.loads(response_str)
+    for policy in all_policies_json["policies"]:
+        policy = sanitize_sort_policy(policy)
+        allofpolicy.append(policy)
+    return allofpolicy
+
+
+def substring_row_eliminator(
+    column, no_fly_list: list, data_frame: pd.DataFrame
+) -> pd.DataFrame:
+    for string in no_fly_list:
+        data_frame = data_frame[~data_frame[column].str.contains(string)]
+    return data_frame
+
+
+def extrapolate_column(data_frame: pd.DataFrame, column: str):
+    return data_frame[column].str[12:24]
+
+
+def accounts_extrapolated(data_frame):
+    mask = data_frame["Computer Group"].str.len() > 30
+    data_frame.loc[mask, "Cloud Account Extrapolated"] = extrapolate_column(
+        data_frame, "Computer Group"
+    )
+    return data_frame
+
+
+def accounts_extrapolated_use_this_one(data_frame):
+    data_frame["Cloud Account Extrapolated (Use This Column)"] = data_frame[
+        "Cloud Account Extrapolated"
+    ].fillna(method="ffill")
+    return data_frame
+
+
+def order_data_frame(data_frame):
+    cols = [
+        "Id",
+        "Hostname",
+        "Display Name",
+        "Computer Group",
+        "Instance Type",
+        "Start Date",
+        "Start Time",
+        "Stop Date",
+        "Stop Time",
+        "Duration (Seconds)",
+        "Cloud Account Extrapolated (Use This Column)",
+        "Cloud Account Extrapolated",
+        "Cloud Account",
+        "AM",
+        "WRS",
+        "AC",
+        "IM",
+        "LI",
+        "FW",
+        "DPI",
+    ]
+    return data_frame[cols]
+
+
+# INFILE = sys.argv[1]
+# OUTFILE = sys.argv[2]
+
+# df = pd.read_csv(INFILE)
+
+# no_fly_list = [
+#     "Computers > Linux \(group 2\) > DPC",
+#     "Computers > Windows \(group 1\) > DPC",
+#     "Computers > Windows \(group 1\) > CC",
+#     "Computers > Linux \(group 2\) > CC",
+# ]
+
+# print("deleting CC and DPC rows...")
+# df = substring_row_eliminator("Computer Group", no_fly_list, df)
+
+# print("Extrapolating Cloud accounts...")
+# df = accounts_extrapolated(df)
+
+# print("Further Extrapolation and copying...")
+# df = accounts_extrapolated_use_this_one(df)
+
+# print("Sorting rows and columns...")
+# df = order_data_frame(df)
+# df = df.sort_values(["Computer Group", "Id"])
+
+# print("Creating CSV...")
+# df.to_csv(OUTFILE, index=False)
+
+if __name__ == "__main__":
+    best_practices = load_best_practices("best-practice-policy.json")
+    allofpolicy = gather_all_policy_json(
+        "https://cloudone.trendmicro.com/", os.environ.get("DS_API_KEY")
+    )
+
+    print("hello")
