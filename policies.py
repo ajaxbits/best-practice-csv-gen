@@ -203,9 +203,11 @@ if __name__ == "__main__":
 
     for policy in allofpolicy:
         policy_id = policy.get("ID")
-        policy_name = policy.get("Name")
+        policy_name = policy.get("name")
         df_dict = recursive_compare(
             policy, best_practices, policy_id, policy_name, df_dict
         )
 
+    df = pd.DataFrame.from_dict(df_dict)
+    df.to_csv("report.csv")
     print("hello")
