@@ -16,7 +16,11 @@
       };
     in {
       devShell."${system}" = pkgs.mkShell {
-        buildInputs = [env pkgs.poetry];
+        buildInputs = with pkgs; [
+          env
+          poetry
+          python38Packages.pandas
+        ];
         shellHook = ''
           mkdir -p .vscode
           echo '{"python.pythonPath": "${env}/bin/python", "python.formatting.provider": "black", "python.formatting.blackPath": "${env}/bin/black", "coc.preferences.formatOnSaveFiletypes":["python"]}' > .vscode/settings.json
